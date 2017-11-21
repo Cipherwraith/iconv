@@ -207,24 +207,25 @@ data Fuzzy = Transliterate | Discard
 -- * This function only works with the GNU iconv implementation which provides
 -- this feature beyond what is required by the iconv specification.
 --
-convertFuzzy :: Fuzzy           -- ^ Whether to try and transliterate or
-                                -- discard characters with no direct conversion
-             -> EncodingName    -- ^ Name of input string encoding
-             -> EncodingName    -- ^ Name of output string encoding
-             -> L.ByteString    -- ^ Input text
-             -> L.ByteString    -- ^ Output text
-convertFuzzy fuzzy fromEncoding toEncoding =
+convertFuzzy :: Fuzzy                  -- ^ Whether to try and transliterate or
+                                       -- discard characters with no direct conversion
+             -> EncodingName           -- ^ Name of input string encoding
+             -> EncodingName           -- ^ Name of output string encoding
+             -> L.ByteString           -- ^ Input text
+             -> Either L.ByteString    -- ^ Output text
+                       ConversionError
+convertFuzzy !fuzzy !fromEncoding !toEncoding !lbs =
 
-    -- lazily convert the list of spans into an ordinary lazy ByteString:
-    L.fromChunks
-  . foldr span []
-  . convertInternal IgnoreInvalidChar fromEncoding (toEncoding ++ mode)
+    -- strictly convert the list of spans into an ordinary lazy ByteString
+    --     -- or an error
+    strictify []
+  . convertInternal IgnoreInvalidChar fromEncoding (toEncoding ++ mode) $! lbs
   where
     mode = case fuzzy of
              Transliterate -> "//IGNORE,TRANSLIT"
              Discard       -> "//IGNORE"
-    span (Span c)            cs = c : cs
-    span (ConversionError _) cs = cs
+    --span (Span !c)            cs = c : cs
+    --span (ConversionError _) cs  = cs
 
 {-# NOINLINE convertStrictly #-}
 -- | This variant does the conversion all in one go, so it is able to report
@@ -245,11 +246,11 @@ convertStrictly fromEncoding toEncoding =
     strictify []
   . convertLazily fromEncoding toEncoding
 
-  where
-    strictify :: [S.ByteString] -> [Span] -> Either L.ByteString ConversionError
-    strictify cs []                    = Left (L.fromChunks (reverse cs))
-    strictify cs (Span c : ss)         = strictify (c:cs) ss
-    strictify _  (ConversionError e:_) = Right e
+{-# NOINLINE strictify #-}
+strictify :: [S.ByteString] -> [Span] -> Either L.ByteString ConversionError
+strictify !cs []                     = Left (L.fromChunks (reverse cs))
+strictify !cs (Span !c : ss)         = strictify (c:cs) ss
+strictify _  (ConversionError e:_)   = Right e
 
 
 {-# NOINLINE convertLazily #-}
