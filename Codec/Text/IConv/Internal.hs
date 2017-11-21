@@ -59,11 +59,11 @@ pushInputBuffer :: S.ByteString -> IConv ()
 pushInputBuffer (S.PS inBuffer' inOffset' inLength') = do
 
   -- must not push a new input buffer if the last one is not used up
-  inAvail <- gets inLength
-  assert (inAvail == 0) $ return ()
+  !inAvail <- gets inLength
+  assert (inAvail == 0) $! return ()
 
   -- now set the available input buffer ptr and length
-  modify $ \bufs -> bufs {
+  modify $! \bufs -> bufs {
     inBuffer = inBuffer',
     inOffset = inOffset',
     inLength = inLength'
@@ -83,8 +83,8 @@ inputPosition = gets inTotal
 
 
 replaceInputBuffer :: (S.ByteString -> S.ByteString) -> IConv ()
-replaceInputBuffer replace =
-  modify $ \bufs ->
+replaceInputBuffer !replace =
+  modify $! \bufs ->
     case replace (S.PS (inBuffer bufs) (inOffset bufs) (inLength bufs)) of
       S.PS inBuffer' inOffset' inLength' ->
         bufs {
@@ -95,18 +95,18 @@ replaceInputBuffer replace =
 
 
 newOutputBuffer :: Int -> IConv ()
-newOutputBuffer size = do
+newOutputBuffer !size = do
 
   --must not push a new buffer if there is still data in the old one
-  outAvail <- gets outLength
-  assert (outAvail == 0) $ return ()
+  !outAvail <- gets outLength
+  assert (outAvail == 0) $! return ()
   -- Note that there may still be free space in the output buffer, that's ok,
   -- you might not want to bother completely filling the output buffer say if
   -- there's only a few free bytes left.
 
   -- now set the available output buffer ptr and length
-  outBuffer' <- unsafeLiftIO $ S.mallocByteString size
-  modify $ \bufs -> bufs {
+  !outBuffer' <- unsafeLiftIO $! S.mallocByteString size
+  modify $! \bufs -> bufs {
       outBuffer = outBuffer',
       outOffset = 0,
       outLength = 0,
@@ -120,12 +120,12 @@ newOutputBuffer size = do
 popOutputBuffer :: IConv S.ByteString
 popOutputBuffer = do
 
-  bufs <- get
+  !bufs <- get
 
   -- there really should be something to pop, otherwise it's silly
-  assert (outLength bufs > 0) $ return ()
+  assert (outLength bufs > 0) $! return ()
 
-  modify $ \buf -> buf {
+  modify $! \buf -> buf {
       outOffset = outOffset bufs + outLength bufs,
       outLength = 0
     }
@@ -218,18 +218,18 @@ instance Monad IConv where
   return = returnI
 
 returnI :: a -> IConv a
-returnI a = I $ \_ bufs -> return (bufs, a)
+returnI !a = I $! \_ bufs -> return (bufs, a)
 {-# INLINE returnI #-}
 
 bindI :: IConv a -> (a -> IConv b) -> IConv b
-bindI m f = I $ \cd bufs -> do
-  (bufs', a) <- unI m cd bufs
+bindI !m !f = I $! \cd bufs -> do
+  (!bufs', a) <- unI m cd bufs
   unI (f a) cd bufs'
 {-# INLINE bindI #-}
 
 thenI :: IConv a -> IConv b -> IConv b
-thenI m f = I $ \cd bufs -> do
-  (bufs', _) <- unI m cd bufs
+thenI !m !f = I $! \cd bufs -> do
+  (!bufs', _) <- unI m cd bufs
   unI f cd bufs'
 {-# INLINE thenI #-}
 
@@ -237,13 +237,13 @@ data InitStatus = InitOk | UnsupportedConversion | UnexpectedInitError Errno
 
 {-# NOINLINE run #-}
 run :: String -> String -> (InitStatus -> IConv a) -> a
-run from to m = unsafePerformIO $ do
-  ptr <- withCString from $ \fromPtr ->
-         withCString to $ \toPtr ->
+run !from !to !m = unsafePerformIO $! do
+  !ptr <- withCString from $! \fromPtr ->
+         withCString to $! \toPtr ->
            c_iconv_open toPtr fromPtr -- note arg reversal
 
-  (cd, status) <- if ptrToIntPtr ptr /= (-1)
-                    then do cd <- newForeignPtr c_iconv_close ptr
+  (!cd, status) <- if ptrToIntPtr ptr /= (-1)
+                    then do !cd <- newForeignPtr c_iconv_close ptr
                             return (cd, InitOk)
                     else do errno <- getErrno
                             cd <- newForeignPtr_ nullPtr
@@ -254,26 +254,26 @@ run from to m = unsafePerformIO $ do
   return a
 
 unsafeLiftIO :: IO a -> IConv a
-unsafeLiftIO m = I $ \_ bufs -> do
-  a <- m
+unsafeLiftIO !m = I $! \_ bufs -> do
+  !a <- m
   return (bufs, a)
 
 -- It's unsafe because we discard the values here, so if you mutate anything
 -- between running this and forcing the result then you'll get an inconsistent
 -- iconv state.
 unsafeInterleave :: IConv a -> IConv a
-unsafeInterleave m = I $ \cd st -> do
-  res <- unsafeInterleaveIO (unI m cd st)
+unsafeInterleave !m = I $! \cd st -> do
+  !res <- unsafeInterleaveIO (unI m cd st)
   return (st, snd res)
 
 get :: IConv Buffers
-get = I $ \_ buf -> return (buf, buf)
+get = I $! \_ buf -> return (buf, buf)
 
 gets :: (Buffers -> a) -> IConv a
-gets getter = I $ \_ buf -> return (buf, getter buf)
+gets getter = I $! \_ buf -> return (buf, getter buf)
 
 modify :: (Buffers -> Buffers) -> IConv ()
-modify change = I $ \_ buf -> return (change buf, ())
+modify change = I $! \_ buf -> return (change buf, ())
 
 ----------------------------
 -- Debug stuff
@@ -285,8 +285,8 @@ trace = unsafeLiftIO . hPutStrLn stderr
 
 dump :: IConv ()
 dump = do
-  bufs <- get
-  unsafeLiftIO $ hPutStrLn stderr $ show bufs
+  !bufs <- get
+  unsafeLiftIO $! hPutStrLn stderr $! show bufs
 
 ----------------------------
 -- iconv wrapper layer
@@ -300,24 +300,24 @@ data Status =
        | UnexpectedError Errno
 
 iconv :: IConv Status
-iconv = I $ \(ConversionDescriptor cdfptr) bufs ->
-  assert (outFree bufs > 0) $
+iconv = I $! \(ConversionDescriptor cdfptr) bufs ->
+  assert (outFree bufs > 0) $!
   --TODO: optimise all this allocation
-  withForeignPtr cdfptr                   $ \cdPtr ->
-  withForeignPtr (inBuffer bufs)          $ \inBufPtr ->
-  with (inBufPtr `plusPtr` inOffset bufs) $ \inBufPtrPtr ->
-  with (fromIntegral (inLength bufs))     $ \inLengthPtr ->
-  withForeignPtr (outBuffer bufs)         $ \outBufPtr ->
-  let outBufPtr' = outBufPtr `plusPtr` (outOffset bufs + outLength bufs) in
-  with outBufPtr'                         $ \outBufPtrPtr ->
-  with (fromIntegral (outFree bufs))      $ \outFreePtr -> do
+  withForeignPtr cdfptr                   $! \cdPtr ->
+  withForeignPtr (inBuffer bufs)          $! \inBufPtr ->
+  with (inBufPtr `plusPtr` inOffset bufs) $! \inBufPtrPtr ->
+  with (fromIntegral (inLength bufs))     $! \inLengthPtr ->
+  withForeignPtr (outBuffer bufs)         $! \outBufPtr ->
+  let !outBufPtr' = outBufPtr `plusPtr` (outOffset bufs + outLength bufs) in
+  with outBufPtr'                         $! \outBufPtrPtr ->
+  with (fromIntegral (outFree bufs))      $! \outFreePtr -> do
 
-    result <- c_iconv cdPtr inBufPtrPtr inLengthPtr outBufPtrPtr outFreePtr
-    inLength' <- fromIntegral `fmap` peek inLengthPtr
-    outFree'  <- fromIntegral `fmap` peek outFreePtr
-    let inByteCount   = inLength bufs - inLength'
-        outByteCount  = outFree bufs  - outFree'
-        bufs' = bufs {
+    !result <- c_iconv cdPtr inBufPtrPtr inLengthPtr outBufPtrPtr outFreePtr
+    !inLength' <- fromIntegral `fmap` peek inLengthPtr
+    !outFree'  <- fromIntegral `fmap` peek outFreePtr
+    let !inByteCount   = inLength bufs - inLength'
+        !outByteCount  = outFree bufs  - outFree'
+        !bufs' = bufs {
             inOffset  = inOffset bufs + inByteCount,
             inLength  = inLength',
             inTotal   = inTotal bufs   + inByteCount,
@@ -326,7 +326,7 @@ iconv = I $ \(ConversionDescriptor cdfptr) bufs ->
           }
     if result /= errVal
       then return (bufs', InputEmpty)
-      else do errno <- getErrno
+      else do !errno <- getErrno
               case () of
                 _ | errno == e2BIG  -> return (bufs', OutputFull)
                   | errno == eINVAL -> return (bufs', IncompleteChar)
@@ -343,7 +343,7 @@ iconv = I $ \(ConversionDescriptor cdfptr) bufs ->
 -- ends.
 --
 finalise :: IConv ()
-finalise = I $ \(ConversionDescriptor cd) bufs -> do
+finalise = I $! \(ConversionDescriptor cd) bufs -> do
   finalizeForeignPtr cd
   return (bufs, ())
 
